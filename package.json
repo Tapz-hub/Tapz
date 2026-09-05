@@ -1,0 +1,9 @@
+{
+  "name": "tapz-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tapz webbplats med Stripe-checkout via Netlify Functions",
+  "dependencies": {
+    "stripe": "^22.0.0"
+  }
+}
