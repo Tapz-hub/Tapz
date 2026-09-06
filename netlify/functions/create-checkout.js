@@ -2,22 +2,21 @@
 //
 // Creates a real Stripe Checkout Session for card, Klarna, or Swish payments.
 // Prices are defined here on the server (never trust prices sent from the browser),
-// so they must be kept in sync with the PRODUCTS / SHIPPING_META / ADDON_STAND_PRICE
-// values in index.html if you ever change a price there.
+// so they must be kept in sync with the PRODUCTS values in index.html if you ever change a price there.
+//
+// Shipping is NOT priced by this function — Stripe Checkout itself collects the
+// shipping address and lets the customer choose a shipping option (see
+// shipping_address_collection / shipping_options below). Update the shipping
+// options there if delivery prices or carriers change.
 
 const Stripe = require('stripe');
 
 // Server-side source of truth for prices (in SEK, whole kronor)
 const PRODUCTS = {
   start: { name: 'Tapz Oregistrerat kort', price: 199, minQty: 1, requiresGoogleLink: false },
-  multi: { name: 'Tapz Registrerat kort', price: 299, minQty: 1, requiresGoogleLink: false },
+  multi: { name: 'Tapz Registrerat kort', price: 299, minQty: 1, requiresGoogleLink: true },
   bulk_start: { name: 'Tapz Bulk – Oregistrerade kort', price: 99, minQty: 10, requiresGoogleLink: false },
   bulk_multi: { name: 'Tapz Bulk – Registrerade kort', price: 99, minQty: 10, requiresGoogleLink: true },
-};
-const ADDON_STAND_PRICE = 59;
-const SHIPPING_PRICES = {
-  postnord: { label: 'Frakt – PostNord', price: 49 },
-  dhl: { label: 'Frakt – DHL', price: 59 },
 };
 const ALLOWED_PAYMENT_METHODS = ['card', 'klarna', 'swish'];
 
@@ -33,16 +32,13 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: 'Ogiltig JSON' }) };
   }
 
-  const { cart, shippingMethod, paymentMethod, customerEmail } = payload;
+  const { cart, paymentMethod, customerEmail } = payload;
 
   if (!Array.isArray(cart) || cart.length === 0) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Kundvagnen är tom' }) };
   }
   if (!ALLOWED_PAYMENT_METHODS.includes(paymentMethod)) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Ogiltig betalmetod' }) };
-  }
-  if (!SHIPPING_PRICES[shippingMethod]) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Ogiltigt fraktsätt' }) };
   }
 
   // Build Stripe line items from the server-side price list only
@@ -64,13 +60,11 @@ exports.handler = async (event) => {
     if (product.requiresGoogleLink && !googleLink) {
       return {
         statusCode: 400,
-        body: JSON.stringify({ error: 'Länk till er Google-sida krävs för ' + product.name }),
+        body: JSON.stringify({ error: 'Länk/företagsinfo krävs för ' + product.name }),
       };
     }
 
-    const unitAmount = product.price + (item.addon ? ADDON_STAND_PRICE : 0);
-    const name = product.name + (item.addon ? ' + kortställ i akryl' : '');
-    const product_data = { name };
+    const product_data = { name: product.name };
     if (googleLink) {
       product_data.metadata = { google_link: googleLink.slice(0, 480) };
     }
@@ -79,22 +73,11 @@ exports.handler = async (event) => {
       price_data: {
         currency: 'sek',
         product_data,
-        unit_amount: unitAmount * 100, // Stripe wants öre, not kronor
+        unit_amount: product.price * 100, // Stripe wants öre, not kronor
       },
       quantity: qty,
     });
   }
-
-  // Shipping as its own line item
-  const shipping = SHIPPING_PRICES[shippingMethod];
-  line_items.push({
-    price_data: {
-      currency: 'sek',
-      product_data: { name: shipping.label },
-      unit_amount: shipping.price * 100,
-    },
-    quantity: 1,
-  });
 
   const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
   const siteUrl = process.env.URL || 'http://localhost:8888';
@@ -105,6 +88,33 @@ exports.handler = async (event) => {
       payment_method_types: [paymentMethod],
       line_items,
       customer_email: customerEmail || undefined,
+      // Stripe collects the delivery address and lets the customer pick a
+      // shipping option here — no shipping logic needed on our side.
+      shipping_address_collection: { allowed_countries: ['SE'] },
+      shipping_options: [
+        {
+          shipping_rate_data: {
+            display_name: 'PostNord',
+            type: 'fixed_amount',
+            fixed_amount: { amount: 4900, currency: 'sek' },
+            delivery_estimate: {
+              minimum: { unit: 'business_day', value: 2 },
+              maximum: { unit: 'business_day', value: 4 },
+            },
+          },
+        },
+        {
+          shipping_rate_data: {
+            display_name: 'DHL',
+            type: 'fixed_amount',
+            fixed_amount: { amount: 5900, currency: 'sek' },
+            delivery_estimate: {
+              minimum: { unit: 'business_day', value: 1 },
+              maximum: { unit: 'business_day', value: 3 },
+            },
+          },
+        },
+      ],
       success_url: siteUrl + '/index.html?order=success',
       cancel_url: siteUrl + '/index.html?order=cancelled',
     });
