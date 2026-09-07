@@ -18,7 +18,7 @@ const PRODUCTS = {
   bulk_start: { name: 'Tapz Bulk – Oregistrerade kort', price: 99, minQty: 10, requiresGoogleLink: false },
   bulk_multi: { name: 'Tapz Bulk – Registrerade kort', price: 99, minQty: 10, requiresGoogleLink: true },
 };
-const ALLOWED_PAYMENT_METHODS = ['card', 'klarna', 'swish'];
+const ALLOWED_PAYMENT_METHODS = ['card', 'klarna'];
 
 exports.handler = async (event) => {
   if (event.httpMethod !== 'POST') {
